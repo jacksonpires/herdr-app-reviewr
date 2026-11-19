@@ -1,0 +1,5 @@
+{
+  "global": {
+    "cmd-alt-r": { "command": "pane.split", "args": { "direction": "right", "mod": "reviewr" } }
+  }
+}
