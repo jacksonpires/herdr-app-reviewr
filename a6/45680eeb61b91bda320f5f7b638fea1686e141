@@ -1,0 +1,23 @@
+README.md
+  s_bc44e073419975::t_2a3b7aea5b03f9 29-30,34
+RECIPE.md
+  s_bc44e073419975::t_523fbc029d3188 24,27,40,50,59-62
+mods/reviewr/main.js
+  s_bc44e073419975::t_988a0814428163 8-15,74,94-103,136-140,431-492,510-515,517-518,530-537,543,574,581,595-596,599,614,627,630,632-644
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a645680eeb61b91bda320f5f7b638fea1686e141",
+  "prompts": {},
+  "sessions": {
+    "s_bc44e073419975": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a005e5df-b36e-4bff-8084-2a07da756e99",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Jackson Pires <jackson.pires@gmail.com>"
+    }
+  }
+}
