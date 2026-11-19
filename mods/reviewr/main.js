@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar, ScrollHandle } from "gpui-base";
-import { spaces, panes, agents, focused, exec, readTextFile, watchFolder, theme, settings, props, run, notify, nextCommand, checking, closeOverlay } from "herdr";
+import { spaces, panes, agents, focused, exec, readTextFile, watchFolder, theme, settings, props, run, notify, nextCommand, checking, closeOverlay, shared, setShared } from "herdr";
 
 const ROW = 20;
 const MAX_LINES = 1500;
@@ -56,7 +56,8 @@ export default class Reviewr extends View {
     if (props()?.overlay) { this.toggler = true; if (!checking()) this.toggle(); return; }
     this.handle = cx.focus_handle();
     this.scroll = ScrollHandle.new();
-    this.scope = props()?.scope === "branch" ? "branch" : "uncommitted";
+    const scope = props()?.scope ?? shared("reviewr.scope");
+    this.scope = scope === "branch" ? "branch" : "uncommitted";
     this.files = []; this.rows = []; this.view = []; this.comments = []; this.nextId = 1;
     this.cursor = -1; this.anchor = null; this.diffWidth = 300; this.listing = false; this.listIndex = 0;
     this.input = InputState.new({ placeholder: "Comment, Enter saves, Esc cancels" });
@@ -487,12 +488,14 @@ export default class Reviewr extends View {
     this.basePicking = null;
     this.baseOverride = ref;
     this.scope = "branch"; this.open = null; this.setRows([]);
+    setShared("reviewr.scope", "branch");
     this.refresh(cx);
   }
 
   setScope(scope, cx) {
     if (this.scope === scope) return;
     this.scope = scope; this.open = null; this.setRows([]); this.refresh(cx);
+    setShared("reviewr.scope", scope);
   }
 
   onKey(e, cx) {

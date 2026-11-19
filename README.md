@@ -21,7 +21,7 @@ Or by hand: copy `mods/reviewr/` to `~/.config/herdr-app/mods/reviewr/` and merg
 ## Use
 
 - `cmd-alt-r` opens reviewr to the right of the focused terminal, on that terminal's repository, and closes it when it is already open in the tab. `q` closes it too. Unsent comments are kept for the next time.
-- `u` / `b`: uncommitted changes, or the whole branch against `origin/main` (or the repository's default branch).
+- `u` / `b`: uncommitted changes, or the whole branch against `origin/main` (or the repository's default branch). reviewr remembers the last scope you picked and opens in it next time.
 - `j` / `k` move, `]` / `[` jump between changes, `f` / `F` switch files.
 - `v` selects a range, `c` comments, `e` edits, `d` deletes. Double-click a line to comment on it.
 - `l` lists every comment: `j` / `k` move, `Enter` goes to the comment in the diff, `e` edits, `d` deletes, `s` sends them all, `y` copies, `l` or `Esc` closes.

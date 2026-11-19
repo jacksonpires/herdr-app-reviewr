@@ -17,7 +17,7 @@ A pane, opened to the right of the focused terminal. Top to bottom:
 
 ## How it behaves
 
-- It reviews the repository of a terminal in the tab it was opened from: an agent's pane first, else the focused terminal, else the first one. `props.folder` overrides that; `props.scope: "branch"` starts in the branch scope.
+- It reviews the repository of a terminal in the tab it was opened from: an agent's pane first, else the focused terminal, else the first one. `props.folder` overrides that. It opens in the last scope picked (`u`, `b`, a click on a pill, or `B`), kept in shared `"reviewr.scope"` so it survives restarts; `uncommitted` the first time. `props.scope` overrides it.
 - **uncommitted** diffs the working tree against `HEAD`, untracked files included as all-added. **branch** diffs the working tree against the merge base of `HEAD` and `origin/HEAD` (else `origin/main`, `origin/master`, `main`, `master`), so it covers the branch's commits and what is not committed yet.
 - It refreshes when anything in the repository changes (a folder watch) and every 15 seconds, keeping the cursor on the same line when it still exists.
 - Click a file to open it. Click a line to put the cursor there, Shift-click to select a range, double-click to comment on it.
@@ -36,7 +36,7 @@ A pane, opened to the right of the focused terminal. Top to bottom:
 - One mod, `mods/reviewr/`, with `main.js` and `mod.json` (`{"place": "none", "focusable": true, "overlay": {"kind": "popup", "width": 1, "height": 1}}`), and a `keys.json` with one global binding, merged into the person's keys: `cmd-alt-r` runs `mod.open:reviewr`.
 - The toggle: a copy opened by `mod.open` has `props().overlay`. It draws nothing, closes its overlay at once with `closeOverlay`, then runs `pane.close` on every reviewr pane in the focused tab, or, when there is none, `pane.split {direction: "right", mod: "reviewr", pane: <focused pane>}`. `q` in the pane runs `pane.close` on the focused reviewr pane.
 - `gpui-kit` (`View`, `div`) and `gpui-base` (`v_flex`, `h_flex`, `InputState`, `Input`, `Scrollbar`, `ScrollHandle`). The diff is a plain `overflow_scroll()` area with every row as a child and a `ScrollHandle` that keeps the cursor on screen; it caps a file at 1,500 lines.
-- `herdr`: `spaces()`, `panes()`, `agents()`, `focused()`, `props()`, `theme()`, `settings()` (`font_family` for the diff), `exec`, `readTextFile`, `watchFolder`, `run`, `notify`, `nextCommand`, `checking`.
+- `herdr`: `shared`, `setShared`, `spaces()`, `panes()`, `agents()`, `focused()`, `props()`, `theme()`, `settings()` (`font_family` for the diff), `exec`, `readTextFile`, `watchFolder`, `run`, `notify`, `nextCommand`, `checking`.
 - Commands: `pane.focus {terminal}` and `terminal.paste` for Send, through `cx.write_to_clipboard`; `cx.open_url` for the pull request. Mod commands, for `keys.json` or `herdr-app do`: `reviewr.send`, `reviewr.refresh`, and `reviewr.key-<keystroke>` (`reviewr.key-n`, `reviewr.key-ctrl-d`, `reviewr.key-escape`), which runs that key as if pressed. Herdr passes a mod command's name but not its value, so the key goes in the name. This is also how the build was tested from a shell.
 - Programs: `git` only (`rev-parse`, `merge-base`, `diff --numstat`, `diff`, `status --porcelain`), always with `--no-optional-locks -c core.fsmonitor=false -c diff.autoRefreshIndex=false` so a read never touches `.git` and wakes the folder watch. Spaces on another machine run git there (`exec` with `on`); the folder watch is local only.
 
@@ -60,6 +60,7 @@ A pane, opened to the right of the focused terminal. Top to bottom:
 - `B`, then `Enter` on another branch, changes the pill to `branch · <ref>` and the diff to that base.
 - `w` wraps long lines; `z` hides the file list; `?` lists every key.
 - `Q` closes the pane, and reopening shows no comments.
+- After `b`, closing and reopening reviewr starts in the branch scope.
 - `b` shows the branch scope against `origin/main` (or the repository's default), including committed work; `u` goes back.
 - Selecting three lines with `v` and `j`, then `c`, typing and `Enter` shows the comment row under the third line and `◆1` on the file.
 - `l` lists every comment; `Enter` on one in another file opens that file with the cursor on it; `d` there removes it from the list and the diff.
