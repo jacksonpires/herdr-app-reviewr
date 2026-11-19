@@ -26,10 +26,12 @@ Or by hand: copy `mods/reviewr/` to `~/.config/herdr-app/mods/reviewr/` and merg
 - `v` selects a range, `c` comments, `e` edits, `d` deletes. Double-click a line to comment on it.
 - `l` lists every comment: `j` / `k` move, `Enter` goes to the comment in the diff, `e` edits, `d` deletes, `s` sends them all, `y` copies, `l` or `Esc` closes.
 - `s` pastes every comment into the agent's input without pressing Enter, so you can read it first. `S` lets you pick the agent. `y` copies the review.
+- `n` / `N` jump to the next or previous comment, `Ctrl+U` / `Ctrl+D` move half a page, `B` picks the base of the branch scope, `w` wraps long lines, `z` hides the file list, `o` opens the branch's pull request (needs `gh`), `Q` closes and drops unsent comments, `?` shows every key.
+- Any key can be rebound from `keys.json` with `reviewr.key-<key>`, e.g. `"mod:reviewr": { "ctrl-n": "reviewr.key-n" }`.
 
 Sending uses the clipboard and moves the keyboard to the agent's pane.
 
-Not included, compared with herdr-reviewr: the last-turn scope, the PR tab, file search and the split view.
+Not included, compared with herdr-reviewr: the last-turn scope, the commits scope (`g`, `G`), the All files and PR tabs (`1`, `2`, `3`), worktree switch (`W`), search (`/`, `Ctrl+F`), go to line (`:`), sideways scroll (`←`, `→`), rendered markdown (`m`), split view (`|`), moving and resizing the file list (`p`, `<`, `>`) and `Tab` between list and diff.
 
 `RECIPE.md` describes the whole mod, so an agent can rebuild it from scratch.
 

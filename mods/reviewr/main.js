@@ -5,7 +5,14 @@ import { spaces, panes, agents, focused, exec, readTextFile, watchFolder, theme,
 const ROW = 20;
 const MAX_LINES = 1500;
 const READ = ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false"];
-const SCOPES = { u: "uncommitted", b: "branch" };
+const HELP = [
+  ["j k ↑ ↓", "move"], ["PgUp PgDn", "page"], ["ctrl-u ctrl-d", "half page"], ["] [", "next / previous change"],
+  ["f F", "next / previous file"], ["u b", "scope: uncommitted / branch"], ["B", "pick the branch scope's base"],
+  ["v", "select lines"], ["c", "comment"], ["e d", "edit / delete the comment"], ["n N", "next / previous comment"],
+  ["l", "list comments"], ["s S", "send to the agent / pick the agent"], ["y Y", "copy the review"],
+  ["w", "wrap lines"], ["z", "hide / show the file list"], ["o", "open the pull request"], ["r", "refresh"],
+  ["q Q", "close / close and drop comments"], ["?", "these keys"],
+];
 
 const untab = (text) => text.replace(/[^\t]*\t/g, (s) => s.slice(0, -1).padEnd((s.length - 1) - (s.length - 1) % 4 + 4));
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -64,6 +71,7 @@ export default class Reviewr extends View {
         if (command === "focus") this.handle.focus();
         else if (command.endsWith("send")) this.send(cx);
         else if (command.endsWith("refresh")) this.refresh(cx);
+        else if (command.startsWith("key-")) this.press(command.slice(4), cx);
         cx.notify();
       }
     });
@@ -81,6 +89,16 @@ export default class Reviewr extends View {
     const own = panes().find((p) => p.mod === "reviewr" && p.focused)
       ?? panes().find((p) => p.mod === "reviewr" && p.tab === this.tab);
     if (own) run("pane.close", { pane: own.pane });
+  }
+
+  press(keystroke, cx) {
+    const parts = keystroke.split("-"), key = parts[parts.length - 1];
+    const plain = parts.length === 1;
+    const named = ["escape", "enter", "up", "down", "pageup", "pagedown"].includes(key);
+    const event = { keystroke, key: plain && !named ? key.toLowerCase() : key, key_char: plain && !named ? key : undefined, modifiers: {} };
+    const proxy = Object.create(cx);
+    proxy.stop_propagation = () => {};
+    this.onKey(event, proxy);
   }
 
   resolveTarget() {
@@ -114,6 +132,11 @@ export default class Reviewr extends View {
     if (this.scope === "uncommitted") {
       const head = await this.git(["rev-parse", "--verify", "HEAD"]);
       return head.code === 0 ? "HEAD" : null;
+    }
+    if (this.baseOverride) {
+      const picked = await this.git(["merge-base", "HEAD", this.baseOverride]);
+      if (picked.code === 0) { this.baseLabel = this.baseOverride; return picked.stdout.trim(); }
+      this.baseOverride = null;
     }
     const remote = await this.git(["rev-parse", "--abbrev-ref", "origin/HEAD"]);
     const candidates = [remote.code === 0 ? remote.stdout.trim() : null, "origin/main", "origin/master", "main", "master"].filter(Boolean);
@@ -405,6 +428,68 @@ export default class Reviewr extends View {
     this.note = `Copied ${plural(this.comments.length, "comment")}`;
   }
 
+  nextComment(by, cx) {
+    const list = this.sortedComments();
+    if (!list.length) { this.note = "No comments yet"; return; }
+    const row = this.view[this.cursor];
+    const line = row?.kind === "-" ? row.old : row?.new ?? 0;
+    const order = (c) => c.file.localeCompare(this.open ?? "") || c.end - line;
+    const target = by > 0 ? list.find((c) => order(c) > 0) ?? list[0] : [...list].reverse().find((c) => order(c) < 0) ?? list[list.length - 1];
+    this.goToComment(target, cx);
+  }
+
+  quitDiscard() {
+    this.comments = [];
+    this.saveComments();
+    this.closePane();
+  }
+
+  openPr(cx) {
+    if (!this.root) return;
+    this.note = "Looking for the pull request…";
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec("gh", ["pr", "view", "--json", "url", "-q", ".url"], { cwd: this.root, on: this.on });
+        const url = r.stdout.split("\n").map((l) => l.trim()).find((l) => l.startsWith("http")) ?? "";
+        if (r.code !== 0 || !url.startsWith("http")) throw new Error((r.stderr || "no pull request for this branch").trim().split("\n")[0]);
+        cx.open_url(url);
+        this.note = null;
+      } catch (e) { this.note = `Cannot open the PR: ${e.message ?? e}`; }
+      cx.notify();
+    });
+  }
+
+  startBasePick(cx) {
+    if (!this.root) return;
+    cx.spawn(async (cx) => {
+      const r = await this.git(["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads", "refs/remotes"]);
+      const refs = r.stdout.split("\n").map((l) => l.trim()).filter((l) => l && !l.endsWith("/HEAD") && l !== "origin");
+      if (!refs.length) { this.note = "No branches found"; cx.notify(); return; }
+      const current = refs.indexOf(this.baseOverride ?? this.baseLabel);
+      this.basePicking = { refs, index: Math.max(0, current) };
+      cx.notify();
+    });
+  }
+
+  onBaseKey(e, cx) {
+    const pick = this.basePicking, k = e.key_char ?? e.key;
+    if (k === "j" || k === "down") pick.index = Math.min(pick.refs.length - 1, pick.index + 1);
+    else if (k === "k" || k === "up") pick.index = Math.max(0, pick.index - 1);
+    else if (k === "pagedown") pick.index = Math.min(pick.refs.length - 1, pick.index + 9);
+    else if (k === "pageup") pick.index = Math.max(0, pick.index - 9);
+    else if (k === "enter") this.chooseBase(pick.refs[pick.index], cx);
+    else if (k === "escape" || k === "B") this.basePicking = null;
+    cx.stop_propagation();
+    cx.notify();
+  }
+
+  chooseBase(ref, cx) {
+    this.basePicking = null;
+    this.baseOverride = ref;
+    this.scope = "branch"; this.open = null; this.setRows([]);
+    this.refresh(cx);
+  }
+
   setScope(scope, cx) {
     if (this.scope === scope) return;
     this.scope = scope; this.open = null; this.setRows([]); this.refresh(cx);
@@ -422,7 +507,15 @@ export default class Reviewr extends View {
       cx.stop_propagation(); cx.notify();
       return;
     }
+    if (this.basePicking) return this.onBaseKey(e, cx);
+    if (this.helping) {
+      if (e.key === "escape" || e.key_char === "?" || e.key === "q") this.helping = false;
+      cx.stop_propagation(); cx.notify();
+      return;
+    }
     if (this.listing) return this.onListKey(e, cx);
+    const chord = { "ctrl-u": () => this.moveCursor(-10), "ctrl-d": () => this.moveCursor(10) }[e.keystroke];
+    if (chord) { this.note = null; chord(); cx.stop_propagation(); cx.notify(); return; }
     const k = e.key_char ?? e.key;
     const handled = {
       j: () => this.moveCursor(1), down: () => this.moveCursor(1),
@@ -434,11 +527,20 @@ export default class Reviewr extends View {
       c: () => this.startComment(cx),
       l: () => this.toggleList(),
       q: () => this.closePane(),
+      Q: () => this.quitDiscard(),
+      n: () => this.nextComment(1, cx),
+      N: () => this.nextComment(-1, cx),
+      z: () => { this.hideFiles = !this.hideFiles; },
+      w: () => { this.wrap = !this.wrap; },
+      o: () => this.openPr(cx),
+      B: () => this.startBasePick(cx),
+      "?": () => { this.helping = true; },
       e: () => this.editComment(cx),
       d: () => this.deleteComment(cx),
       s: () => this.send(cx),
       S: () => this.send(cx, true),
       y: () => this.copy(cx),
+      Y: () => this.copy(cx),
       u: () => this.setScope("uncommitted", cx),
       b: () => this.setScope("branch", cx),
       r: () => { this.resolveTarget(); this.refresh(cx); },
@@ -469,14 +571,14 @@ export default class Reviewr extends View {
     }
     if (r.kind === "@") return div().w_full().h(ROW).flex_none().px(12).truncate().bg(t.raised).text_color(t.dim).child(r.text);
     const picked = this.inSelection(i) && selectable(r);
-    return h_flex().id(`r${i}`).w_full().h(ROW).flex_none().gap(8).cursor_pointer()
+    return h_flex().id(`r${i}`).w_full().when(this.wrap, (el) => el.min_h(ROW).items_start()).when(!this.wrap, (el) => el.h(ROW)).flex_none().gap(8).cursor_pointer()
       .when(r.kind === "+", (el) => el.bg(t.ansi2 + "18")).when(r.kind === "-", (el) => el.bg(t.ansi1 + "18"))
       .when(picked, (el) => el.bg(t.selection))
       .on_click((e, cx) => this.clickRow(i, e, cx))
       .child(div().w(34).flex_none().text_right().text_color(t.dim).child(r.old === undefined ? "" : String(r.old)))
       .child(div().w(34).flex_none().text_right().text_color(t.dim).child(r.new === undefined ? "" : String(r.new)))
       .child(div().w(10).flex_none().text_color(r.kind === "+" ? t.ansi2 : r.kind === "-" ? t.ansi1 : t.dim).child(r.kind === " " ? "" : r.kind))
-      .child(div().flex_1().whitespace_nowrap().child(r.text));
+      .child(div().flex_1().when(this.wrap, (el) => el.min_w(0).whitespace_normal()).when(!this.wrap, (el) => el.whitespace_nowrap()).child(r.text));
   }
 
   render(cx) {
@@ -490,9 +592,11 @@ export default class Reviewr extends View {
     const filesHeight = Math.max(1, Math.min(this.files.length, 8)) * 26 + 11;
     const hint = this.typing ? "Enter save · Esc cancel"
       : this.picking ? "1–9 pick agent · Esc cancel"
+      : this.helping ? "? or Esc close"
+      : this.basePicking ? "j/k move · Enter use as base · Esc cancel"
       : this.listing ? "j/k move · Enter go to · e edit · d delete · s send all · S pick · y copy · l/Esc close"
       : this.anchor !== null ? "j/k extend · c comment · Esc clear"
-      : "j/k move · v select · c comment · e edit · d delete · l list · ]/[ change · f/F file · s send · S pick · y copy · q close";
+      : "j/k move · v select · c comment · e edit · d delete · l list · ]/[ change · f/F file · s send · y copy · ? keys";
     const listed = this.listing && !this.typing ? this.sortedComments() : [];
     const listStart = Math.max(0, Math.min(this.listIndex - 4, listed.length - 9));
     return v_flex().id("reviewr").size_full().min_h(0).bg(t.background).text_color(t.foreground).text_size(13)
@@ -507,7 +611,7 @@ export default class Reviewr extends View {
         .child(div().id("send").px(8).py(2).rounded(6).text_size(11).cursor_pointer()
           .bg(count ? t.solid : t.raised).text_color(count ? t.solid_foreground : t.dim)
           .on_click((_e, cx) => { this.send(cx); cx.notify(); }).child(count ? `Send ${plural(count, "comment")}` : "No comments")))
-      .child(div().flex_none().h(filesHeight - 1).relative().border_b(1).border_color(t.border)
+      .when(!this.hideFiles, (el) => el.child(div().flex_none().h(filesHeight - 1).relative().border_b(1).border_color(t.border)
         .child(v_flex().id("reviewr-files").absolute().inset_0().overflow_y_scroll().p(5).children(this.files.map((f) => {
           const parts = f.path.split("/"), name = parts.pop();
           const notes = this.comments.filter((c) => c.file === f.path).length;
@@ -520,11 +624,24 @@ export default class Reviewr extends View {
             .when(f.add > 0, (el) => el.child(div().text_size(11).text_color(t.ansi2).child(`+${f.add}`)))
             .when(f.del > 0, (el) => el.child(div().text_size(11).text_color(t.ansi1).child(`−${f.del}`)));
         })).when(!this.files.length, (el) => el.child(div().p(6).text_color(t.dim).child(this.error ?? (this.loading ? "Loading…" : `No ${this.scope} changes`)))))
-        .child(Scrollbar.vertical("reviewr-files").absolute().inset_0()))
+        .child(Scrollbar.vertical("reviewr-files").absolute().inset_0())))
       .child(div().id("reviewr-diff-box").flex_1().min_h(0).relative().font_family(settings().font_family ?? "JetBrains Mono").text_size(12)
         .child(div().id("reviewr-diff").absolute().inset_0().overflow_scroll().track_scroll(this.scroll)
-          .child(v_flex().min_w(this.diffWidth).children(this.view.map((r, i) => this.row(r, i, t)))))
+          .child(v_flex().when(this.wrap, (el) => el.w_full()).when(!this.wrap, (el) => el.min_w(this.diffWidth)).children(this.view.map((r, i) => this.row(r, i, t)))))
         .child(Scrollbar.vertical("reviewr-diff").absolute().inset_0()))
+      .when(Boolean(this.helping), (el) => el.child(v_flex().flex_none().p(8).gap(1).border_t(1).border_color(t.border).bg(t.surface).text_size(11)
+        .children(HELP.map(([keys, what]) => h_flex().gap(8)
+          .child(div().w(110).flex_none().text_color(t.accent).font_family(settings().font_family ?? "JetBrains Mono").child(keys))
+          .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(what))))))
+      .when(Boolean(this.basePicking), (el) => {
+        const pick = this.basePicking, start = Math.max(0, Math.min(pick.index - 4, pick.refs.length - 9));
+        return el.child(v_flex().flex_none().p(8).gap(2).border_t(1).border_color(t.border).bg(t.surface)
+          .child(div().text_size(11).text_color(t.muted).child(`Base for the branch scope · ${pick.refs.length} branches`))
+          .children(pick.refs.slice(start, start + 9).map((ref, n) => h_flex().id(`base-${ref}`).px(6).py(2).rounded(5).cursor_pointer()
+            .when(start + n === pick.index, (s) => s.bg(t.selected)).hover((s) => s.bg(t.hover))
+            .on_click((_e, cx) => this.chooseBase(ref, cx))
+            .child(div().truncate().child(ref)))));
+      })
       .when(listed.length > 0, (el) => el.child(v_flex().flex_none().p(8).gap(2).border_t(1).border_color(t.border).bg(t.surface)
         .child(div().text_size(11).text_color(t.muted).child(`Comments · ${listed.length}`))
         .children(listed.slice(listStart, listStart + 9).map((c, n) => {
