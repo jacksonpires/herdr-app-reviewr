@@ -50,7 +50,7 @@ export default class Reviewr extends View {
     this.scroll = ScrollHandle.new();
     this.scope = props()?.scope === "branch" ? "branch" : "uncommitted";
     this.files = []; this.rows = []; this.view = []; this.comments = []; this.nextId = 1;
-    this.cursor = -1; this.anchor = null; this.diffWidth = 300;
+    this.cursor = -1; this.anchor = null; this.diffWidth = 300; this.listing = false; this.listIndex = 0;
     this.input = InputState.new({ placeholder: "Comment, Enter saves, Esc cancels" });
     this.input.on("submit", (_e, cx) => this.saveComment(cx));
     this.resolveTarget();
@@ -270,8 +270,7 @@ export default class Reviewr extends View {
     cx.notify();
   }
 
-  editComment(cx) {
-    const c = this.commentAtCursor();
+  editComment(cx, c = this.commentAtCursor()) {
     if (!c) return;
     this.editing = { ...c };
     this.input.set_value(c.text);
@@ -298,11 +297,61 @@ export default class Reviewr extends View {
     cx.notify();
   }
 
-  deleteComment(cx) {
-    const c = this.commentAtCursor();
+  deleteComment(cx, c = this.commentAtCursor()) {
     if (!c) return;
     this.comments = this.comments.filter((x) => x.id !== c.id);
     this.saveComments();
+    if (this.listing) {
+      this.listIndex = Math.min(this.listIndex, this.comments.length - 1);
+      if (!this.comments.length) this.listing = false;
+    }
+    cx.notify();
+  }
+
+  sortedComments() {
+    return [...this.comments].sort((a, b) => a.file.localeCompare(b.file) || a.start - b.start);
+  }
+
+  toggleList() {
+    if (this.listing) { this.listing = false; return; }
+    if (!this.comments.length) { this.note = "No comments yet"; return; }
+    this.listing = true;
+    this.listIndex = 0;
+  }
+
+  goToComment(c, cx) {
+    this.listing = false;
+    const land = () => {
+      const i = this.view.findIndex((r) => r.kind === "comment" && r.comment.id === c.id);
+      if (i > 0) { this.cursor = i - 1; this.scroll.scroll_to_item(i); }
+    };
+    if (this.open === c.file) { land(); cx.notify(); return; }
+    this.open = c.file; this.anchor = null; this.cursor = -1; this.setRows([]);
+    cx.spawn(async (cx) => {
+      try { await this.load(c.file); land(); } catch (e) { this.note = `Cannot load diff: ${e.message ?? e}`; }
+      cx.notify();
+    });
+  }
+
+  onListKey(e, cx) {
+    const list = this.sortedComments(), chosen = list[this.listIndex];
+    const k = e.key_char ?? e.key;
+    const action = {
+      j: () => { this.listIndex = Math.min(list.length - 1, this.listIndex + 1); },
+      down: () => { this.listIndex = Math.min(list.length - 1, this.listIndex + 1); },
+      k: () => { this.listIndex = Math.max(0, this.listIndex - 1); },
+      up: () => { this.listIndex = Math.max(0, this.listIndex - 1); },
+      enter: () => chosen && this.goToComment(chosen, cx),
+      e: () => chosen && this.editComment(cx, chosen),
+      d: () => chosen && this.deleteComment(cx, chosen),
+      s: () => { this.listing = false; this.send(cx); },
+      S: () => { this.listing = false; this.send(cx, true); },
+      y: () => this.copy(cx),
+      l: () => { this.listing = false; },
+      escape: () => { this.listing = false; },
+    }[k];
+    if (action) action();
+    cx.stop_propagation();
     cx.notify();
   }
 
@@ -358,6 +407,7 @@ export default class Reviewr extends View {
       cx.stop_propagation(); cx.notify();
       return;
     }
+    if (this.listing) return this.onListKey(e, cx);
     const k = e.key_char ?? e.key;
     const handled = {
       j: () => this.moveCursor(1), down: () => this.moveCursor(1),
@@ -367,6 +417,7 @@ export default class Reviewr extends View {
       f: () => this.moveFile(1, cx), F: () => this.moveFile(-1, cx),
       v: () => { this.anchor = this.anchor === null ? this.cursor : null; },
       c: () => this.startComment(cx),
+      l: () => this.toggleList(),
       e: () => this.editComment(cx),
       d: () => this.deleteComment(cx),
       s: () => this.send(cx),
@@ -422,8 +473,11 @@ export default class Reviewr extends View {
     const filesHeight = Math.max(1, Math.min(this.files.length, 8)) * 26 + 11;
     const hint = this.typing ? "Enter save · Esc cancel"
       : this.picking ? "1–9 pick agent · Esc cancel"
+      : this.listing ? "j/k move · Enter go to · e edit · d delete · s send all · S pick · y copy · l/Esc close"
       : this.anchor !== null ? "j/k extend · c comment · Esc clear"
-      : "j/k move · v select · c comment · e edit · d delete · ]/[ change · f/F file · s send · S pick · y copy";
+      : "j/k move · v select · c comment · e edit · d delete · l list · ]/[ change · f/F file · s send · S pick · y copy";
+    const listed = this.listing && !this.typing ? this.sortedComments() : [];
+    const listStart = Math.max(0, Math.min(this.listIndex - 4, listed.length - 9));
     return v_flex().id("reviewr").size_full().min_h(0).bg(t.background).text_color(t.foreground).text_size(13)
       .track_focus(this.handle).on_key_down((e, cx) => this.onKey(e, cx))
       .on_mouse_down("left", () => { if (!this.typing) this.handle.focus(); })
@@ -454,6 +508,16 @@ export default class Reviewr extends View {
         .child(div().id("reviewr-diff").absolute().inset_0().overflow_scroll().track_scroll(this.scroll)
           .child(v_flex().min_w(this.diffWidth).children(this.view.map((r, i) => this.row(r, i, t)))))
         .child(Scrollbar.vertical("reviewr-diff").absolute().inset_0()))
+      .when(listed.length > 0, (el) => el.child(v_flex().flex_none().p(8).gap(2).border_t(1).border_color(t.border).bg(t.surface)
+        .child(div().text_size(11).text_color(t.muted).child(`Comments · ${listed.length}`))
+        .children(listed.slice(listStart, listStart + 9).map((c, n) => {
+          const i = listStart + n;
+          return v_flex().id(`comment-${c.id}`).px(6).py(3).rounded(5).cursor_pointer()
+            .when(i === this.listIndex, (s) => s.bg(t.selected)).hover((s) => s.bg(t.hover))
+            .on_click((e, cx) => { if (e.click_count === 2) this.goToComment(c, cx); else { this.listIndex = i; cx.notify(); } })
+            .child(div().text_size(11).text_color(t.accent).truncate().child(location(c)))
+            .child(div().text_size(12).truncate().child(c.text.replace(/\n/g, " ⏎ ")));
+        }))))
       .when(Boolean(this.picking), (el) => el.child(v_flex().flex_none().p(8).gap(2).border_t(1).border_color(t.border).bg(t.surface)
         .child(div().text_size(11).text_color(t.muted).child("Send to which agent?"))
         .children((this.picking ?? []).slice(0, 9).map((a, n) => h_flex().id(`agent-${a.address}`).gap(8).px(6).py(2).rounded(5).cursor_pointer().hover((s) => s.bg(t.hover))

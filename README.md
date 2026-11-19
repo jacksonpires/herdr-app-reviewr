@@ -24,6 +24,7 @@ Or by hand: copy `mods/reviewr/` to `~/.config/herdr-app/mods/reviewr/` and merg
 - `u` / `b`: uncommitted changes, or the whole branch against `origin/main` (or the repository's default branch).
 - `j` / `k` move, `]` / `[` jump between changes, `f` / `F` switch files.
 - `v` selects a range, `c` comments, `e` edits, `d` deletes. Double-click a line to comment on it.
+- `l` lists every comment: `j` / `k` move, `Enter` goes to the comment in the diff, `e` edits, `d` deletes, `s` sends them all, `y` copies, `l` or `Esc` closes.
 - `s` pastes every comment into the agent's input without pressing Enter, so you can read it first. `S` lets you pick the agent. `y` copies the review.
 
 Sending uses the clipboard and moves the keyboard to the agent's pane.
