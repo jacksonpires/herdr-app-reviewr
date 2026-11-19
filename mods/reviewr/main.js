@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar, ScrollHandle } from "gpui-base";
-import { spaces, panes, agents, focused, exec, readTextFile, watchFolder, theme, settings, props, run, notify, nextCommand, checking } from "herdr";
+import { spaces, panes, agents, focused, exec, readTextFile, watchFolder, theme, settings, props, run, notify, nextCommand, checking, closeOverlay } from "herdr";
 
 const ROW = 20;
 const MAX_LINES = 1500;
@@ -46,6 +46,7 @@ function formatReview(root, comments) {
 
 export default class Reviewr extends View {
   init(_props, cx) {
+    if (props()?.overlay) { this.toggler = true; if (!checking()) this.toggle(); return; }
     this.handle = cx.focus_handle();
     this.scroll = ScrollHandle.new();
     this.scope = props()?.scope === "branch" ? "branch" : "uncommitted";
@@ -66,6 +67,20 @@ export default class Reviewr extends View {
         cx.notify();
       }
     });
+  }
+
+  toggle() {
+    const f = focused();
+    const mine = panes().filter((p) => p.mod === "reviewr" && p.tab === f?.tab);
+    closeOverlay(props().overlay);
+    if (mine.length) for (const p of mine) run("pane.close", { pane: p.pane });
+    else run("pane.split", { direction: "right", mod: "reviewr", ...(f?.pane ? { pane: f.pane } : {}) });
+  }
+
+  closePane() {
+    const own = panes().find((p) => p.mod === "reviewr" && p.focused)
+      ?? panes().find((p) => p.mod === "reviewr" && p.tab === this.tab);
+    if (own) run("pane.close", { pane: own.pane });
   }
 
   resolveTarget() {
@@ -418,6 +433,7 @@ export default class Reviewr extends View {
       v: () => { this.anchor = this.anchor === null ? this.cursor : null; },
       c: () => this.startComment(cx),
       l: () => this.toggleList(),
+      q: () => this.closePane(),
       e: () => this.editComment(cx),
       d: () => this.deleteComment(cx),
       s: () => this.send(cx),
@@ -464,6 +480,7 @@ export default class Reviewr extends View {
   }
 
   render(cx) {
+    if (this.toggler) return div();
     const t = theme();
     const add = this.files.reduce((n, f) => n + f.add, 0), del = this.files.reduce((n, f) => n + f.del, 0);
     const pill = (label, active, onClick) => div().id(`scope-${label}`).px(8).py(2).rounded(6).text_size(11).cursor_pointer()
@@ -475,7 +492,7 @@ export default class Reviewr extends View {
       : this.picking ? "1–9 pick agent · Esc cancel"
       : this.listing ? "j/k move · Enter go to · e edit · d delete · s send all · S pick · y copy · l/Esc close"
       : this.anchor !== null ? "j/k extend · c comment · Esc clear"
-      : "j/k move · v select · c comment · e edit · d delete · l list · ]/[ change · f/F file · s send · S pick · y copy";
+      : "j/k move · v select · c comment · e edit · d delete · l list · ]/[ change · f/F file · s send · S pick · y copy · q close";
     const listed = this.listing && !this.typing ? this.sortedComments() : [];
     const listStart = Math.max(0, Math.min(this.listIndex - 4, listed.length - 9));
     return v_flex().id("reviewr").size_full().min_h(0).bg(t.background).text_color(t.foreground).text_size(13)
